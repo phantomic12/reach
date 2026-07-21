@@ -27,13 +27,15 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+tests/corpus/
+tests/output/
+tests/test_report.json
+
+# Artifacts
+test.pdf
+output.json
+report.json
 
 # Environment
 .env
 .env.local
-tests/corpus/
-tests/output/
-test.pdf
-output.json
-report.json
-tests/test_report.json
