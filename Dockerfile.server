@@ -1,0 +1,10 @@
+FROM python:3.12-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends libqpdf-dev libjpeg-dev libpng-dev && rm -rf /var/lib/apt/lists/*
+COPY pyproject.toml reach-core/ ./
+RUN pip install --no-cache-dir -e ".[server,surya]"
+COPY reach-core/ reach-core/
+COPY reach-server/ reach-server/
+RUN mkdir -p /root/.reach/models
+EXPOSE 8501
+CMD ["uvicorn", "reach-server.main:app", "--host", "0.0.0.0", "--port", "8501"]

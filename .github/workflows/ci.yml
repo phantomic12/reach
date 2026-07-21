@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/ -q --tb=short --ignore=tests/test_cli.py
+
+  build-linux:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install pyinstaller && pip install -e ".[server]"
+      - run: pyinstaller --onefile --name reach reach-core/src/reach/cli.py
+      - uses: actions/upload-artifact@v4
+        with: {name: reach-linux, path: dist/reach}
+
+  build-windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install pyinstaller && pip install -e ".[server]"
+      - run: pyinstaller --onefile --name reach.exe reach-core/src/reach/cli.py
+      - uses: actions/upload-artifact@v4
+        with: {name: reach-windows, path: dist/reach.exe}
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t reach-server -f Dockerfile.server .
+      - run: docker build -t reach-webui -f Dockerfile.webui .

@@ -1,0 +1,124 @@
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reach — PDF/UA-2 Remediation</title>
+    <style>
+        :root { --bg: #fafafa; --card: #fff; --text: #222; --accent: #2563eb; --border: #e5e7eb; --muted: #6b7280; --green: #10b981; --red: #ef4444; --radius: 10px; }
+        [data-theme="dark"] { --bg: #111827; --card: #1f2937; --text: #f3f4f6; --border: #374151; --muted: #9ca3af; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 40px 20px; }
+        .container { max-width: 720px; width: 100%; }
+        h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; }
+        .subtitle { color: var(--muted); margin-bottom: 32px; }
+        .dropzone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 60px 20px; text-align: center; cursor: pointer; transition: border-color .2s, background .2s; background: var(--card); }
+        .dropzone:hover, .dropzone.drag { border-color: var(--accent); background: rgba(37,99,235,.05); }
+        .dropzone p { color: var(--muted); font-size: 1.1rem; }
+        .dropzone .icon { font-size: 2.5rem; margin-bottom: 12px; }
+        input[type=file] { display: none; }
+        .jobs { margin-top: 32px; }
+        .job { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+        .job-name { font-weight: 600; }
+        .job-status { font-size: .85rem; font-weight: 500; padding: 4px 10px; border-radius: 20px; }
+        .status-queued { background: #f3f4f6; color: #6b7280; }
+        .status-processing { background: #dbeafe; color: #2563eb; }
+        .status-complete { background: #d1fae5; color: #059669; }
+        .status-failed { background: #fee2e2; color: #dc2626; }
+        .progress-bar { width: 100%; height: 6px; background: var(--border); border-radius: 3px; margin-top: 8px; overflow: hidden; }
+        .progress-fill { height: 100%; background: var(--accent); transition: width .3s; border-radius: 3px; }
+        .download-btn { color: var(--accent); text-decoration: none; font-weight: 600; font-size: .9rem; }
+        .theme-toggle { position: fixed; top: 20px; right: 20px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 1.1rem; }
+    </style>
+</head>
+<body>
+    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+        <span id="theme-icon">🌙</span>
+    </button>
+    <div class="container">
+        <h1>Reach</h1>
+        <p class="subtitle">Drop inaccessible PDFs. Get back PDF/UA-2 compliant documents. All processing runs locally — your files never leave this server.</p>
+        <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+            <div class="icon">📄</div>
+            <p>Drop PDFs here or click to upload</p>
+            <p style="font-size:.85rem;margin-top:8px">Single PDF or ZIP of multiple PDFs accepted</p>
+        </div>
+        <input type="file" id="fileInput" accept=".pdf,.zip" multiple onchange="handleFiles(this.files)">
+        <div class="jobs" id="jobs"></div>
+    </div>
+    <script>
+        let jobs = [];
+        const jobsEl = document.getElementById('jobs');
+        const dropzone = document.getElementById('dropzone');
+
+        dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+        dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+        dropzone.addEventListener('drop', e => { e.preventDefault(); dropzone.classList.remove('drag'); handleFiles(e.dataTransfer.files); });
+
+        async function handleFiles(files) {
+            for (const file of files) {
+                const formData = new FormData();
+                formData.append('file', file);
+                const isZip = file.name.endsWith('.zip');
+                const endpoint = isZip ? '/api/batch' : '/api/upload';
+                try {
+                    const res = await fetch(endpoint, { method: 'POST', body: formData });
+                    const data = await res.json();
+                    if (isZip) {
+                        data.jobs.forEach(j => jobs.push(j));
+                    } else {
+                        jobs.push(data);
+                    }
+                    renderJobs();
+                    if (isZip) data.jobs.forEach(j => pollJob(j.job_id));
+                    else pollJob(data.job_id);
+                } catch (err) {
+                    alert('Upload failed: ' + err.message);
+                }
+            }
+        }
+
+        async function pollJob(jobId) {
+            const interval = setInterval(async () => {
+                try {
+                    const res = await fetch('/api/status/' + jobId);
+                    const data = await res.json();
+                    const idx = jobs.findIndex(j => j.job_id === jobId);
+                    if (idx >= 0) jobs[idx] = data;
+                    renderJobs();
+                    if (data.status === 'complete' || data.status === 'failed') clearInterval(interval);
+                } catch (e) { clearInterval(interval); }
+            }, 1000);
+        }
+
+        function renderJobs() {
+            jobsEl.innerHTML = jobs.map(j => `
+                <div class="job">
+                    <div style="flex:1">
+                        <div class="job-name">${j.filename || j.job_id}</div>
+                        <div class="progress-bar"><div class="progress-fill" style="width:${j.progress||0}%"></div></div>
+                    </div>
+                    <span class="job-status status-${j.status}">${j.status}</span>
+                    ${j.status === 'complete' ? `<a class="download-btn" href="/api/download/${j.job_id}">⬇ Download</a>` : ''}
+                </div>
+            `).join('');
+        }
+
+        function toggleTheme() {
+            const html = document.documentElement;
+            const icon = document.getElementById('theme-icon');
+            if (html.getAttribute('data-theme') === 'dark') {
+                html.setAttribute('data-theme', 'light');
+                icon.textContent = '🌙';
+            } else {
+                html.setAttribute('data-theme', 'dark');
+                icon.textContent = '☀️';
+            }
+        }
+
+        // Check system dark mode preference
+        if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.getElementById('theme-icon').textContent = '☀️';
+        }
+    </script>
+</body>
