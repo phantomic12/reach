@@ -1,0 +1,38 @@
+# Reach — Docker Compose for production deployment
+# Start: docker compose up -d
+# GPU:   ensure nvidia-container-toolkit is installed
+
+version: "3.8"
+
+services:
+  reach-server:
+    build: .
+    container_name: reach-server
+    ports:
+      - "8501:8501"
+    volumes:
+      # Persistent model cache (download once, survive restarts)
+      - reach-models:/root/.reach/models
+      # Upload and output directories
+      - reach-data:/tmp/reach-uploads
+      - reach-output:/tmp/reach-output
+    environment:
+      - REACH_MODELS_DIR=/root/.reach/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  reach-models:
+  reach-data:
+  reach-output:

@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "reach-core"
+version = "0.1.0"
+description = "Automated PDF/UA-2 remediation pipeline — accessible PDFs from any source"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.12"
+authors = [{name = "Reach contributors"}]
+keywords = ["pdf", "accessibility", "pdf-ua", "remediation", "ocr", "document"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Text Processing",
+]
+
+dependencies = [
+    "pikepdf>=9.0",
+    "pypdf>=5.0",
+    "llama-cpp-python>=0.3.0",
+    "torch>=2.5",
+    "pillow>=11.0",
+    "pydantic>=2.0",
+    "rich>=13.0",
+    "typer>=0.12",
+    "httpx>=0.28",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+server = ["fastapi>=0.115", "uvicorn>=0.32", "jinja2>=3.1", "python-multipart>=0.0.12"]
+desktop = ["pyinstaller>=6.0"]
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "pytest-xdist>=3.0", "ruff>=0.7", "mypy>=1.12"]
+surya = ["surya-ocr>=2.0"]
+all = ["reach-core[server,desktop,dev,surya]"]
+
+[project.scripts]
+reach = "reach.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/phantomic12/reach"
+Repository = "https://github.com/phantomic12/reach"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/reach"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["reach-core/src"]
+addopts = "-x --tb=short -p no:warnings"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
