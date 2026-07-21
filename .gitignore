@@ -32,3 +32,8 @@ htmlcov/
 .env
 .env.local
 tests/corpus/
+tests/output/
+test.pdf
+output.json
+report.json
+tests/test_report.json
