@@ -39,3 +39,5 @@ report.json
 # Environment
 .env
 .env.local
+dist/
+build/
