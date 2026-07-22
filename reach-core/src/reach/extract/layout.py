@@ -135,24 +135,14 @@ class SuryaLayoutModel:
     def load(self) -> None:
         """Load Surya model weights into memory."""
         try:
-            from surya.detection import batch_detection
-            from surya.model.detection.model import (
-                load_model as surya_load_model,
-            )
-            from surya.model.detection.processor import (
-                load_processor as surya_load_processor,
-            )
-            from surya.settings import settings
+            from surya.inference import SuryaInferenceManager
+            from surya.layout import LayoutPredictor
 
-            if self.models_dir:
-                settings.DETECTOR_MODEL_CHECKPOINT = str(self.models_dir)
-
-            self._model = surya_load_model()
-            self._processor = surya_load_processor()
-            self._batch_func = batch_detection
+            self._manager = SuryaInferenceManager()
+            self._predictor = LayoutPredictor(self._manager)
             self._loaded = True
             self._available = True
-            log.info("Surya layout model loaded successfully.")
+            log.info("Surya layout model loaded successfully (v2 API).")
         except ImportError:
             log.warning(
                 "surya-ocr not installed. Layout analysis will return empty results. "
@@ -167,35 +157,30 @@ class SuryaLayoutModel:
     def is_available(self) -> bool:
         return self._available
 
-    def detect(self, images: list[Image.Image]) -> list[list[SuryaBlock]]:
-        """Run layout detection on a list of page images.
-
-        Args:
-            images: One PIL Image per page.
-
-        Returns:
-            A list (per page) of lists of SuryaBlock objects.
-        """
-        if not self._available or not self._model:
+    def detect(self, images: list[Image.Image]) -> list[list["SuryaBlock"]]:
+        """Run layout detection on a list of page images using Surya v2."""
+        if not self._available or not self._predictor:
             log.warning("Surya model not loaded — returning empty layout.")
             return [[] for _ in images]
 
         try:
-            results = self._batch_func(images, [self._model], [self._processor])
-            # results is a list of DetectionResult per page
-            output: list[list[SuryaBlock]] = []
+            results = self._predictor(images)
+            output: list[list["SuryaBlock"]] = []
             for page_result in results:
-                page_blocks: list[SuryaBlock] = []
-                for b in page_result.bboxes:
-                    # b is a Surya PolygonBox with label, bbox, etc.
-                    block = SuryaBlock(
-                        label=getattr(b, "label", "Text"),
-                        bbox=list(getattr(b, "bbox", [0, 0, 100, 100])),
-                        reading_order=getattr(b, "position", 0),
-                        confidence=getattr(b, "confidence", 0.0),
+                page_blocks: list["SuryaBlock"] = []
+                for block in page_result.blocks:
+                    surya_block = SuryaBlock(
+                        label=getattr(block, "label", "Text"),
+                        bbox=[
+                            getattr(block.bbox, "x0", 0),
+                            getattr(block.bbox, "y0", 0),
+                            getattr(block.bbox, "x1", 100),
+                            getattr(block.bbox, "y1", 100),
+                        ],
+                        reading_order=getattr(block, "reading_order", 0),
+                        confidence=getattr(block, "confidence", 0.0),
                     )
-                    page_blocks.append(block)
-                # Sort by reading order
+                    page_blocks.append(surya_block)
                 page_blocks.sort(key=lambda x: x.reading_order)
                 output.append(page_blocks)
             return output
@@ -205,8 +190,8 @@ class SuryaLayoutModel:
 
     def unload(self) -> None:
         """Free model memory."""
-        self._model = None
-        self._processor = None
+        self._predictor = None
+        self._manager = None
         self._loaded = False
 
 

@@ -1,0 +1,90 @@
+{
+  "document": {
+    "input_path": "/home/yoav/projects/reach/tests/corpus/01-fall-2017-Ian-Geert.pdf",
+    "output_path": "/home/yoav/projects/reach/tests/benchmark_output/01-fall-2017-Ian-Geert-remediated.pdf",
+    "timestamp": "2026-07-22T17:11:06.387348+00:00"
+  },
+  "status": {
+    "overall": "pass",
+    "pipeline_version": "0.1.0"
+  },
+  "fixes": [
+    {
+      "component": "extract",
+      "description": "Extracted layout, text, images, forms, and links from source PDF",
+      "status": "fixed",
+      "detail": ""
+    },
+    {
+      "component": "tagtree",
+      "description": "Constructed PDF/UA-2 tag tree from extraction data",
+      "status": "fixed",
+      "detail": ""
+    },
+    {
+      "component": "construct",
+      "description": "Wrote PDF/UA-2 output with embedded fonts, metadata, and tag tree",
+      "status": "fixed",
+      "detail": ""
+    }
+  ],
+  "total_fixes": 3,
+  "confidence": {
+    "overall": 0.808,
+    "sections": [
+      {
+        "section": "extraction",
+        "score": 0.85,
+        "notes": [
+          "Layout extraction confidence based on Surya model output"
+        ]
+      },
+      {
+        "section": "tag_tree",
+        "score": 0.8,
+        "notes": [
+          "Tag mapping heuristics; may need manual review for complex documents"
+        ]
+      },
+      {
+        "section": "forms",
+        "score": 0.9,
+        "notes": [
+          "Form fields detected and tagged with tooltips"
+        ]
+      },
+      {
+        "section": "links",
+        "score": 0.85,
+        "notes": [
+          "Link annotations preserved with accessible descriptions"
+        ]
+      },
+      {
+        "section": "fonts",
+        "score": 0.75,
+        "notes": [
+          "Font embedding and ToUnicode CMap generation; some fonts may need manual embedding"
+        ]
+      },
+      {
+        "section": "alt_text",
+        "score": 0.7,
+        "notes": [
+          "Alt text may need human review for complex figures and diagrams"
+        ]
+      }
+    ]
+  },
+  "validation": {
+    "verapdf_compliant": false,
+    "failures": 0,
+    "warnings": 0,
+    "by_category": {}
+  },
+  "human_review": [],
+  "performance": {
+    "processing_time_seconds": 0.03,
+    "peak_memory_mb": 0.0
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "metadata": {
+    "title": "",
+    "author": "Sulema Ebrahim",
+    "subject": "",
+    "keywords": "",
+    "language": "en",
+    "page_count": 7,
+    "pdf_version": "1.6"
+  },
+  "pages": [
+    {
+      "metadata": {
+        "page_number": 1,
+        "width_pt": 612.0,
+        "height_pt": 792.0,
+        "rotation": 0,
+        "is_scanned": false,
+        "text_coverage": 0.0
+      },
+      "blocks": []
+    },
+    {
+      "metadata": {
+        "page_number": 2,
+        "width_pt": 612.0,
+        "height_pt": 792.0,
+        "rotation": 0,
+        "is_scanned": true,
+        "text_coverage": 0.0
+      },
+      "blocks": []
+    },
+    {
+      "metadata": {
+        "page_number": 3,
+        "width_pt": 612.0,
+        "height_pt": 792.0,
+        "rotation": 0,
+        "is_scanned": false,
+        "text_coverage": 0.0
+      },
+      "blocks": []
+    },
+    {
+      "metadata": {
+        "page_number": 4,
+        "width_pt": 603.106,
+        "height_pt": 847.482,
+        "rotation": 0,
+        "is_scanned": false,
+        "text_coverage": 0.0
+      },
+      "blocks": []
+    },
+    {
+      "metadata": {
+        "page_number": 5,
+        "width_pt": 606.494,
+        "height_pt": 850.024,
+        "rotation": 0,
+        "is_scanned": false,
+        "text_coverage": 0.0
+      },
+      "blocks": []
+    },
+    {
+      "metadata": {
+        "page_number": 6,
+        "width_pt": 595.059,
+        "height_pt": 841.553,
+        "rotation": 0,
+        "is_scanned": false,
+        "text_coverage": 0.0
+      },
+      "blocks": []
+    },
+    {
+      "metadata": {
+        "page_number": 7,
+        "width_pt": 609.671,
+        "height_pt": 852.353,
+        "rotation": 0,
+        "is_scanned": false,
+        "text_coverage": 0.0
+      },
+      "blocks": []
+    }
+  ]
+}

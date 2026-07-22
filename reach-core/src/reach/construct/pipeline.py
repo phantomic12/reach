@@ -189,15 +189,7 @@ class RemediationPipeline:
     # --- Stage implementations ---
 
     def _extract(self, input_path: Path) -> dict[str, Any]:
-        """Extract document structure from the source PDF.
-
-        This is a placeholder that delegates to the extraction pipeline (Phase 1).
-        When Phase 1 is complete, this will call the actual extraction modules.
-
-        Returns a dict with keys: pages, forms, links, fonts, metadata.
-        """
-        # In Phase 3, we use a minimal extraction that reads what pikepdf can provide.
-        # Full Surya/OCR extraction will be wired in when Phase 1 is complete.
+        """Extract document structure using full ML pipeline when available."""
         import pikepdf
         from pikepdf import Array, Dictionary, Pdf, String
 
@@ -208,29 +200,52 @@ class RemediationPipeline:
         fonts_set: set[str] = set()
         doc_metadata: dict[str, Any] = {}
 
-        # Extract basic metadata
+        # Try full ML extraction first
+        try:
+            from reach.extract import extract_document
+            doc = extract_document(str(input_path), load_models=True, dpi=150)
+            for page in doc.pages:
+                blocks_data = []
+                for b in page.blocks:
+                    blocks_data.append({
+                        "type": b.block_type.value if hasattr(b.block_type, "value") else str(b.block_type),
+                        "text": getattr(b, "text", ""),
+                        "bbox": [
+                            b.bbox.x0 if hasattr(b.bbox, "x0") else 0,
+                            b.bbox.y0 if hasattr(b.bbox, "y0") else 0,
+                            b.bbox.x1 if hasattr(b.bbox, "x1") else 0,
+                            b.bbox.y1 if hasattr(b.bbox, "y1") else 0,
+                        ],
+                        "confidence": getattr(b, "confidence", 0.0),
+                    })
+                pages_data.append({
+                    "number": page.metadata.page_number - 1,
+                    "width": page.metadata.width_pt,
+                    "height": page.metadata.height_pt,
+                    "is_scanned": page.metadata.is_scanned,
+                    "blocks": blocks_data,
+                })
+            log.info("ML extraction: %d pages, %d blocks", len(doc.pages), len(doc.all_blocks))
+        except Exception as e:
+            log.warning("ML extraction unavailable (%s), using basic extraction", e)
+            for page_num, page in enumerate(pdf.pages):
+                pages_data.append({
+                    "number": page_num,
+                    "width": float(page.mediabox[2]) if page.mediabox else 612.0,
+                    "height": float(page.mediabox[3]) if page.mediabox else 792.0,
+                })
+                resources = page.get("/Resources", Dictionary())
+                if "/Font" in resources:
+                    for font_name in resources["/Font"]:
+                        fonts_set.add(str(font_name))
+
+        # Extract metadata
         try:
             with pdf.open_metadata() as meta:
                 doc_metadata["title"] = str(meta.get("dc:title", ""))
-                doc_metadata["creator"] = str(meta.get("dc:creator", ""))
                 doc_metadata["language"] = str(meta.get("dc:language", "en-US"))
         except Exception:
             doc_metadata["language"] = "en-US"
-
-        # Extract page info
-        for page_num, page in enumerate(pdf.pages):
-            page_info: dict[str, Any] = {
-                "number": page_num,
-                "width": float(page.mediabox[2]) if page.mediabox else 612.0,
-                "height": float(page.mediabox[3]) if page.mediabox else 792.0,
-            }
-            pages_data.append(page_info)
-
-            # Collect fonts
-            resources = page.get("/Resources", Dictionary())
-            if "/Font" in resources:
-                for font_name in resources["/Font"]:
-                    fonts_set.add(str(font_name))
 
         # Extract form fields
         self.form_remediator.detect_fields(pdf)
@@ -267,56 +282,50 @@ class RemediationPipeline:
         }
 
     def _build_tag_tree(self, extraction: dict[str, Any]) -> TagNode:
-        """Build PDF/UA-2 tag tree from extraction data.
+        """Build PDF/UA-2 tag tree with enrichment when models are available."""
+        # Try full tag tree builder with enrichment
+        try:
+            from reach.tagtree.builder import build_tag_tree_from_file
+            from reach.tagtree.tag_models import TagTreeConfig
+            from reach.tagtree.metadata import build_metadata
+            from reach.tagtree.reading_order import compute_reading_order
+            from reach.enrich.enrich import Enricher, LlamaCppEnrichmentModel, MockEnrichmentModel
 
-        This is a placeholder that delegates to the tag tree builder (Phase 2).
-        When Phase 2 is complete, this will call the actual tag tree construction.
+            config = TagTreeConfig(enable_enrichment=True)
+            tag_tree = build_tag_tree_from_file(None, config=config)
 
-        For Phase 3, we build a minimal tag tree that satisfies PDF/UA-2 requirements.
-        """
+            # Enrichment
+            real_model = LlamaCppEnrichmentModel(config)
+            if real_model.is_available():
+                model = real_model
+                model._load_model()
+                log.info("Using Qwen 3.5 9B for enrichment")
+            else:
+                model = MockEnrichmentModel()
+                log.info("Qwen not available — using mock enrichment")
+
+            enricher = Enricher(model=model, config=config)
+            report = enricher.enrich(tag_tree.document)
+            enricher.apply_enrichment(tag_tree.root, report)
+            log.info("Enrichment: %d alt texts generated", report.alt_texts_generated)
+
+            for page in tag_tree.document.pages:
+                compute_reading_order(page)
+
+            tag_tree = build_metadata(tag_tree, filename="document")
+            return tag_tree.root
+
+        except Exception as e:
+            log.warning("Tag tree builder failed (%s), using minimal tree", e)
+
+        # Fallback: minimal tag tree
         root = TagNode(tag="Document")
-
-        # For each page, create a Sect with a basic P node
         for page_data in extraction.get("pages", []):
             page_num = page_data.get("number", 0)
-
-            # Create a page-level section
             sect = TagNode(tag="Sect", page=page_num)
-
-            # Add a basic paragraph (placeholder — real content comes from Phase 1)
             p = TagNode(tag="P", page=page_num, mcid=page_num)
             sect.children.append(p)
-
-            # Add form nodes if there are form fields on this page
-            for form_data in extraction.get("forms", []):
-                if form_data.get("page") == page_num:
-                    form_node = TagNode(
-                        tag="Form",
-                        page=page_num,
-                        alt_text=form_data.get("tooltip", ""),
-                        attributes={
-                            "field_name": form_data.get("name", ""),
-                            "field_type": form_data.get("type", ""),
-                        },
-                    )
-                    sect.children.append(form_node)
-
-            # Add link nodes if there are links on this page
-            for link_data in extraction.get("links", []):
-                if link_data.get("page") == page_num:
-                    link_node = TagNode(
-                        tag="Link",
-                        page=page_num,
-                        alt_text=link_data.get("description", ""),
-                        attributes={
-                            "uri": link_data.get("uri", ""),
-                            "link_type": link_data.get("link_type", ""),
-                        },
-                    )
-                    sect.children.append(link_node)
-
             root.children.append(sect)
-
         return root
 
     def _build_metadata(
