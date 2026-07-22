@@ -32,7 +32,7 @@ class ReadingOrderConfig:
     """Configuration for reading order detection."""
 
     column_gap_threshold: float = 20.0  # Minimum gap to consider a column boundary
-    sidebar_max_width_ratio: float = 0.35  # Max width ratio for sidebar detection
+    sidebar_max_width_ratio: float = 0.40  # Max width ratio for sidebar detection
     footnote_min_y_ratio: float = 0.85  # Bottom of page threshold for footnotes
     header_max_y_ratio: float = 0.08  # Top of page threshold for headers
     enable_xy_cut: bool = True
@@ -405,17 +405,17 @@ def classify_special_regions(
         y_rel = b.bbox.y0 / page_height if page_height else 0
         width_rel = b.bbox.width / page_width if page_width else 1
 
-        # Headers: top of page
-        if y_rel < config.header_max_y_ratio:
-            result["headers"].append(b)
-        # Footnotes: bottom of page
-        elif y_rel > config.footnote_min_y_ratio:
+        # Footnotes: bottom of page (check first — narrow footnotes at bottom)
+        if y_rel > config.footnote_min_y_ratio:
             result["footnotes"].append(b)
-        # Sidebars: narrow column on left or right
-        elif width_rel < config.sidebar_max_width_ratio and (
-            x_rel < 0.15 or x_rel > 0.75
-        ):
+        # Sidebars: narrow column on left or right, AND tall (spans most of page)
+        elif (width_rel < config.sidebar_max_width_ratio and
+              (x_rel < 0.15 or x_rel > 0.70) and
+              b.bbox.height / page_height > 0.3):
             result["sidebars"].append(b)
+        # Headers: top of page
+        elif y_rel < config.header_max_y_ratio:
+            result["headers"].append(b)
         else:
             result["main_content"].append(b)
 

@@ -131,18 +131,16 @@ class TestSpecialRegionClassification:
         assert result["footnotes"][0].text == "Footnote 1"
         assert len(result["main_content"]) == 1
 
-    @pytest.mark.xfail(reason="Sidebar classification threshold needs tuning — non-critical heuristic")
     def test_sidebar_detection(self):
         blocks = [
             make_block("Main content", 50, 50, 400, 200),
-            make_block("Sidebar note", 470, 50, 530, 800),  # Narrow (60px), far right (x_rel > 0.75)
+            make_block("Sidebar note", 520, 50, 580, 800),  # Narrow, right side
         ]
         result = classify_special_regions(blocks, 612, 792)
         # Sidebars are narrow, off-center blocks on the right
         assert len(result["sidebars"]) == 1
         assert result["sidebars"][0].text == "Sidebar note"
 
-    @pytest.mark.xfail(reason="Mixed-page classification thresholds need tuning — non-critical heuristic")
     def test_mixed_page(self):
         blocks = [
             make_block("Running Header", 0, 5, 612, 20),
