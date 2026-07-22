@@ -2,7 +2,7 @@
   "document": {
     "input_path": "/home/yoav/projects/reach/tests/corpus/1- CUNYBuy Guide - Creating A Software Purchase or Renewal Requisition.pdf",
     "output_path": "/home/yoav/projects/reach/tests/benchmark_output/1- CUNYBuy Guide - Creating A Software Purchase or Renewal Requisition-remediated.pdf",
-    "timestamp": "2026-07-22T17:04:55.317240+00:00"
+    "timestamp": "2026-07-22T17:55:41.030024+00:00"
   },
   "status": {
     "overall": "pass",
@@ -84,7 +84,7 @@
   },
   "human_review": [],
   "performance": {
-    "processing_time_seconds": 0.01,
+    "processing_time_seconds": 0.45,
     "peak_memory_mb": 0.0
   }
 }

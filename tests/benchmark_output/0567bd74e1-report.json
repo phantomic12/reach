@@ -2,7 +2,7 @@
   "document": {
     "input_path": "/home/yoav/projects/reach/tests/corpus/0567bd74e1.pdf",
     "output_path": "/home/yoav/projects/reach/tests/benchmark_output/0567bd74e1-remediated.pdf",
-    "timestamp": "2026-07-22T17:04:41.681408+00:00"
+    "timestamp": "2026-07-22T17:55:16.030257+00:00"
   },
   "status": {
     "overall": "pass",
@@ -84,7 +84,7 @@
   },
   "human_review": [],
   "performance": {
-    "processing_time_seconds": 0.04,
+    "processing_time_seconds": 10.19,
     "peak_memory_mb": 0.0
   }
 }

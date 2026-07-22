@@ -2,7 +2,7 @@
   "document": {
     "input_path": "/home/yoav/projects/reach/tests/corpus/09182405_Paying_for_College_Brochure_2024.pdf",
     "output_path": "/home/yoav/projects/reach/tests/benchmark_output/09182405_Paying_for_College_Brochure_2024-remediated.pdf",
-    "timestamp": "2026-07-22T17:04:47.002391+00:00"
+    "timestamp": "2026-07-22T17:55:25.299581+00:00"
   },
   "status": {
     "overall": "pass",
@@ -84,7 +84,7 @@
   },
   "human_review": [],
   "performance": {
-    "processing_time_seconds": 0.02,
+    "processing_time_seconds": 1.03,
     "peak_memory_mb": 0.0
   }
 }

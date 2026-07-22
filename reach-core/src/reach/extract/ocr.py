@@ -119,15 +119,15 @@ class UnlimitedOCREngine:
             return
 
         try:
-            # Attempt to load via transformers pipeline
-            from transformers import AutoModel, AutoProcessor
+            from transformers import AutoModelForCausalLM, AutoTokenizer
 
-            self._processor = AutoProcessor.from_pretrained(
+            self._tokenizer = AutoTokenizer.from_pretrained(
                 str(self.models_dir), trust_remote_code=True
             )
-            self._model = AutoModel.from_pretrained(
+            self._model = AutoModelForCausalLM.from_pretrained(
                 str(self.models_dir),
                 trust_remote_code=True,
+                torch_dtype="auto",
             )
 
             if self.backend == "cuda":
