@@ -201,43 +201,59 @@ class RemediationPipeline:
         doc_metadata: dict[str, Any] = {}
 
         # Try full ML extraction first
+        ml_success = False
         try:
             from reach.extract import extract_document
             doc = extract_document(str(input_path), load_models=True, dpi=150)
-            for page in doc.pages:
-                blocks_data = []
-                for b in page.blocks:
-                    blocks_data.append({
-                        "type": b.block_type.value if hasattr(b.block_type, "value") else str(b.block_type),
-                        "text": getattr(b, "text", ""),
-                        "bbox": [
-                            b.bbox.x0 if hasattr(b.bbox, "x0") else 0,
-                            b.bbox.y0 if hasattr(b.bbox, "y0") else 0,
-                            b.bbox.x1 if hasattr(b.bbox, "x1") else 0,
-                            b.bbox.y1 if hasattr(b.bbox, "y1") else 0,
-                        ],
-                        "confidence": getattr(b, "confidence", 0.0),
+            if doc.all_blocks:
+                for page in doc.pages:
+                    blocks_data = []
+                    for b in page.blocks:
+                        blocks_data.append({
+                            "type": b.block_type.value if hasattr(b.block_type, "value") else str(b.block_type),
+                            "text": getattr(b, "text", ""),
+                            "bbox": [
+                                b.bbox.x0 if hasattr(b.bbox, "x0") else 0,
+                                b.bbox.y0 if hasattr(b.bbox, "y0") else 0,
+                                b.bbox.x1 if hasattr(b.bbox, "x1") else 0,
+                                b.bbox.y1 if hasattr(b.bbox, "y1") else 0,
+                            ],
+                            "confidence": getattr(b, "confidence", 0.0),
+                        })
+                    pages_data.append({
+                        "number": page.metadata.page_number - 1,
+                        "width": page.metadata.width_pt,
+                        "height": page.metadata.height_pt,
+                        "is_scanned": page.metadata.is_scanned,
+                        "blocks": blocks_data,
                     })
-                pages_data.append({
-                    "number": page.metadata.page_number - 1,
-                    "width": page.metadata.width_pt,
-                    "height": page.metadata.height_pt,
-                    "is_scanned": page.metadata.is_scanned,
-                    "blocks": blocks_data,
-                })
-            log.info("ML extraction: %d pages, %d blocks", len(doc.pages), len(doc.all_blocks))
+                ml_success = True
+                log.info("ML extraction: %d pages, %d blocks", len(doc.pages), len(doc.all_blocks))
         except Exception as e:
-            log.warning("ML extraction unavailable (%s), using basic extraction", e)
-            for page_num, page in enumerate(pdf.pages):
-                pages_data.append({
-                    "number": page_num,
-                    "width": float(page.mediabox[2]) if page.mediabox else 612.0,
-                    "height": float(page.mediabox[3]) if page.mediabox else 792.0,
-                })
-                resources = page.get("/Resources", Dictionary())
-                if "/Font" in resources:
-                    for font_name in resources["/Font"]:
-                        fonts_set.add(str(font_name))
+            log.warning("ML extraction failed: %s", e)
+
+        # Fallback: PDF text layout
+        if not ml_success:
+            try:
+                from reach.extract.pdf_layout import extract_text_blocks
+                text_blocks = extract_text_blocks(str(input_path))
+                pages_map: dict[int, list] = {}
+                for b in text_blocks:
+                    pn = b.get("page", 0)
+                    pages_map.setdefault(pn, []).append(b)
+                for page_num in sorted(pages_map):
+                    pages_data.append({
+                        "number": page_num, "width": 612.0, "height": 792.0,
+                        "blocks": pages_map[page_num],
+                    })
+                log.info("PDF text layout: %d pages, %d blocks", len(pages_data), len(text_blocks))
+            except Exception:
+                for page_num, page in enumerate(pdf.pages):
+                    pages_data.append({
+                        "number": page_num,
+                        "width": float(page.mediabox[2]) if page.mediabox else 612.0,
+                        "height": float(page.mediabox[3]) if page.mediabox else 792.0,
+                    })
 
         # Extract metadata
         try:

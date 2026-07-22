@@ -133,24 +133,32 @@ class SuryaLayoutModel:
         self._available = False
 
     def load(self) -> None:
-        """Load Surya model weights into memory."""
+        """Load layout detection model (DocLayout-YOLO, falls back to Surya v2)."""
+        # Try DocLayout-YOLO first (fast, no Docker needed)
+        try:
+            from doclayout_yolo import YOLOv10
+            self._model = YOLOv10.from_pretrained("doclayout-yolo")
+            self._loaded = True
+            self._available = True
+            log.info("DocLayout-YOLO loaded successfully.")
+            return
+        except Exception as e:
+            log.debug("DocLayout-YOLO unavailable: %s", e)
+
+        # Fall back to Surya v2
         try:
             from surya.inference import SuryaInferenceManager
             from surya.layout import LayoutPredictor
-
             self._manager = SuryaInferenceManager()
             self._predictor = LayoutPredictor(self._manager)
             self._loaded = True
             self._available = True
-            log.info("Surya layout model loaded successfully (v2 API).")
+            log.info("Surya layout model loaded (v2 API).")
         except ImportError:
-            log.warning(
-                "surya-ocr not installed. Layout analysis will return empty results. "
-                "Install with: pip install reach-core[surya]"
-            )
+            log.warning("No layout model available. Install doclayout-yolo or surya-ocr.")
             self._available = False
         except Exception:
-            log.exception("Failed to load Surya layout model")
+            log.exception("Failed to load layout model")
             self._available = False
 
     @property
@@ -158,34 +166,50 @@ class SuryaLayoutModel:
         return self._available
 
     def detect(self, images: list[Image.Image]) -> list[list["SuryaBlock"]]:
-        """Run layout detection on a list of page images using Surya v2."""
-        if not self._available or not self._predictor:
-            log.warning("Surya model not loaded — returning empty layout.")
+        """Run layout detection using available backend."""
+        if not self._available:
             return [[] for _ in images]
 
         try:
-            results = self._predictor(images)
-            output: list[list["SuryaBlock"]] = []
-            for page_result in results:
-                page_blocks: list["SuryaBlock"] = []
-                for block in page_result.blocks:
-                    surya_block = SuryaBlock(
-                        label=getattr(block, "label", "Text"),
-                        bbox=[
-                            getattr(block.bbox, "x0", 0),
-                            getattr(block.bbox, "y0", 0),
-                            getattr(block.bbox, "x1", 100),
-                            getattr(block.bbox, "y1", 100),
-                        ],
-                        reading_order=getattr(block, "reading_order", 0),
-                        confidence=getattr(block, "confidence", 0.0),
-                    )
-                    page_blocks.append(surya_block)
-                page_blocks.sort(key=lambda x: x.reading_order)
-                output.append(page_blocks)
-            return output
+            # DocLayout-YOLO path
+            if hasattr(self, "_model") and self._model:
+                results = self._model.detect(images)
+                output: list[list["SuryaBlock"]] = []
+                for page_result in results:
+                    page_blocks: list["SuryaBlock"] = []
+                    for det in page_result:
+                        surya_block = SuryaBlock(
+                            label=det.get("label", "Text"),
+                            bbox=det.get("bbox", [0, 0, 100, 100]),
+                            reading_order=0,
+                            confidence=det.get("confidence", 0.9),
+                        )
+                        page_blocks.append(surya_block)
+                    output.append(page_blocks)
+                return output
+
+            # Surya v2 path
+            if hasattr(self, "_predictor") and self._predictor:
+                results = self._predictor(images)
+                output: list[list["SuryaBlock"]] = []
+                for page_result in results:
+                    page_blocks: list["SuryaBlock"] = []
+                    for block in page_result.blocks:
+                        surya_block = SuryaBlock(
+                            label=getattr(block, "label", "Text"),
+                            bbox=[getattr(block.bbox, "x0", 0), getattr(block.bbox, "y0", 0),
+                                  getattr(block.bbox, "x1", 100), getattr(block.bbox, "y1", 100)],
+                            reading_order=getattr(block, "reading_order", 0),
+                            confidence=getattr(block, "confidence", 0.0),
+                        )
+                        page_blocks.append(surya_block)
+                    page_blocks.sort(key=lambda x: x.reading_order)
+                    output.append(page_blocks)
+                return output
+
+            return [[] for _ in images]
         except Exception:
-            log.exception("Surya detection failed")
+            log.exception("Layout detection failed")
             return [[] for _ in images]
 
     def unload(self) -> None:
