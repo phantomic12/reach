@@ -237,14 +237,18 @@ class RemediationPipeline:
             try:
                 from reach.extract.pdf_layout import extract_text_blocks
                 text_blocks = extract_text_blocks(str(input_path))
-                pages_map: dict[int, list] = {}
+                pages_map: dict[int, list] = {pn: [] for pn in range(len(pdf.pages))}
                 for b in text_blocks:
                     pn = b.get("page", 0)
                     pages_map.setdefault(pn, []).append(b)
                 for page_num in sorted(pages_map):
+                    blocks = pages_map[page_num]
+                    page = pdf.pages[page_num]
                     pages_data.append({
-                        "number": page_num, "width": 612.0, "height": 792.0,
-                        "blocks": pages_map[page_num],
+                        "number": page_num,
+                        "width": float(page.mediabox[2]) if page.mediabox else 612.0,
+                        "height": float(page.mediabox[3]) if page.mediabox else 792.0,
+                        "blocks": blocks,
                     })
                 log.info("PDF text layout: %d pages, %d blocks", len(pages_data), len(text_blocks))
             except Exception:
@@ -306,9 +310,29 @@ class RemediationPipeline:
             from reach.tagtree.metadata import build_metadata
             from reach.tagtree.reading_order import compute_reading_order
             from reach.enrich.enrich import Enricher, LlamaCppEnrichmentModel, MockEnrichmentModel
+            import json
+            import tempfile
 
             config = TagTreeConfig(enable_enrichment=True)
-            tag_tree = build_tag_tree_from_file(None, config=config)
+
+            # Adapt extraction dict into ExtractionDocument schema and serialize
+            # to a tempfile so the builder can parse it via model_validate.
+            adapted = self._adapt_extraction_for_tagtree(extraction)
+
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False, encoding="utf-8"
+            ) as f:
+                json.dump(adapted, f)
+                extraction_path = f.name
+
+            try:
+                tag_tree = build_tag_tree_from_file(extraction_path, config=config)
+            finally:
+                try:
+                    import os
+                    os.unlink(extraction_path)
+                except OSError:
+                    pass
 
             # Enrichment
             real_model = LlamaCppEnrichmentModel(config)
@@ -329,7 +353,21 @@ class RemediationPipeline:
                 compute_reading_order(page)
 
             tag_tree = build_metadata(tag_tree, filename="document")
-            return tag_tree.root
+            result = self._convert_to_writer_tag_node(tag_tree.root)
+            if not result.children and extraction.get("pages"):
+                # Real builder produced no children (e.g., blank/scanned PDF
+                # with no extractable text). Fall back to a minimal Sect/P
+                # structure so downstream stages have something to tag.
+                log.info("Empty extraction — emitting minimal per-page tag tree")
+                root = TagNode(tag="Document")
+                for page_data in extraction["pages"]:
+                    page_num = page_data.get("number", 0)
+                    sect = TagNode(tag="Sect", page=page_num)
+                    p = TagNode(tag="P", page=page_num, mcid=page_num)
+                    sect.children.append(p)
+                    root.children.append(sect)
+                return root
+            return result
 
         except Exception as e:
             log.warning("Tag tree builder failed (%s), using minimal tree", e)
@@ -343,6 +381,97 @@ class RemediationPipeline:
             sect.children.append(p)
             root.children.append(sect)
         return root
+
+    @staticmethod
+    def _adapt_extraction_for_tagtree(extraction: dict[str, Any]) -> dict[str, Any]:
+        """Reshape `_extract()` output into ExtractionDocument schema.
+
+        `_extract` returns ``{"pages": [{"number", "width", "height", "blocks":
+        [{"type", "bbox": [x0,y0,x1,y1], "text", "confidence"}]}, ...], ...}``.
+        ExtractionDocument wants ``{"pages": [{"page_number", "width", "height",
+        "is_scanned", "blocks": [{"type", "bbox": {x0,y0,x1,y1}, "text",
+        "reading_order", "confidence", "page_number"}]}, ...], ...}``.
+        """
+        pages = []
+        for page in extraction.get("pages", []):
+            blocks = []
+            for i, b in enumerate(page.get("blocks", [])):
+                raw_bbox = b.get("bbox") or [0, 0, 0, 0]
+                # Convert [x0, y0, x1, y1] list to dict for ExtractionBlock
+                if isinstance(raw_bbox, (list, tuple)) and len(raw_bbox) == 4:
+                    bbox = {
+                        "x0": raw_bbox[0],
+                        "y0": raw_bbox[1],
+                        "x1": raw_bbox[2],
+                        "y1": raw_bbox[3],
+                    }
+                else:
+                    bbox = raw_bbox
+                blocks.append({
+                    "type": b.get("type", "Text"),
+                    "bbox": bbox,
+                    "text": b.get("text", ""),
+                    "reading_order": b.get("reading_order", i),
+                    "confidence": b.get("confidence", 0.0),
+                    "page_number": page.get("number", 0),
+                })
+            pages.append({
+                "page_number": page.get("number", 0),
+                "width": page.get("width", 612.0),
+                "height": page.get("height", 792.0),
+                "is_scanned": page.get("is_scanned", False),
+                "blocks": blocks,
+            })
+        return {
+            "filename": extraction.get("metadata", {}).get("title", ""),
+            "metadata": extraction.get("metadata", {}),
+            "pages": pages,
+        }
+
+    @staticmethod
+    def _convert_to_writer_tag_node(node) -> TagNode:
+        """Convert a tagtree.tag_models.TagNode (pydantic) tree into a writer TagNode (dataclass).
+
+        The pydantic TagNode uses ``page_number``; the writer expects ``page``.
+        Other attribute names also differ slightly (``is_decorative``, ``colspan``, etc.).
+        """
+        # page_number -> page, with the same None/0 semantics the writer expects.
+        page = getattr(node, "page_number", None) or getattr(node, "page", None)
+        bbox = getattr(node, "bbox", None)
+        bbox_tuple: tuple[float, float, float, float] | None = None
+        if bbox is not None:
+            try:
+                bbox_tuple = (
+                    float(getattr(bbox, "x0", 0)),
+                    float(getattr(bbox, "y0", 0)),
+                    float(getattr(bbox, "x1", 0)),
+                    float(getattr(bbox, "y1", 0)),
+                )
+            except Exception:
+                bbox_tuple = None
+
+        # tag is an enum-like value on the pydantic model; convert to string
+        tag = getattr(node, "tag", None)
+        tag_str = tag.value if hasattr(tag, "value") else str(tag)
+
+        writer_node = TagNode(
+            tag=tag_str,
+            page=int(page) if page is not None else None,
+            bbox=bbox_tuple,
+            text=getattr(node, "text", "") or None,
+            alt_text=getattr(node, "alt_text", "") or None,
+            lang=getattr(node, "language_override", "") or None,
+            actual_text=None,
+            mcid=getattr(node, "mcid", None),
+            attributes=getattr(node, "attributes", {}) or {},
+        )
+
+        for child in getattr(node, "children", []) or []:
+            writer_node.children.append(
+                RemediationPipeline._convert_to_writer_tag_node(child)
+            )
+
+        return writer_node
 
     def _build_metadata(
         self,

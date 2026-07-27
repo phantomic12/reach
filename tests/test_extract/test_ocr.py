@@ -73,14 +73,20 @@ def _make_mock_engine(
     engine = UnlimitedOCREngine(backend=backend)
     engine._available = available
     engine._model = MagicMock()
-    engine._processor = MagicMock()
+    engine._tokenizer = MagicMock()
 
     if decode_return is None:
         decode_return = ["Mocked OCR text"]
 
-    engine._processor.batch_decode.return_value = decode_return
-    engine._processor.return_value = {"pixel_values": MagicMock()}
-    engine._model.generate.return_value = MagicMock()
+    # New OCR path: model.infer() writes <output_path>/result.md; we intercept
+    # that by making infer() create the file with the desired text.
+    def fake_infer(tokenizer, prompt="", image_file="", output_path="", **_kwargs):
+        from pathlib import Path
+        out = Path(output_path) / "result.md"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("\n".join(decode_return), encoding="utf-8")
+
+    engine._model.infer.side_effect = fake_infer
     return engine
 
 

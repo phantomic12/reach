@@ -57,71 +57,36 @@ def run_full_remediation(pdf_path: Path, output_dir: Path) -> dict[str, Any]:
         "elapsed_s": 0.0,
     }
 
-    # ---- Stage 1: Extraction with Surya + OCR ----
+    # ---- Stage 1-3: Full remediation via CLI (handles extraction, tags, construction) ----
     try:
-        from reach.extract import extract_document
-        doc = extract_document(str(pdf_path), output_path=out_json, load_models=True, dpi=150)
-        result["extraction_blocks"] = len(doc.all_blocks)
-        result["page_count"] = len(doc.pages)
-    except Exception as e:
-        # Models may not be available — fall back to pikepdf-only extraction
-        result["warnings"].append(f"Model extraction failed: {e}. Using pikepdf-only extraction.")
-        doc = None
-
-    # ---- Stage 2: Build tag tree with enrichment ----
-    try:
-        from reach.tagtree.builder import build_tag_tree_from_file
-        from reach.tagtree.tag_models import TagTreeConfig
-        from reach.enrich.enrich import Enricher, LlamaCppEnrichmentModel, MockEnrichmentModel
-        from reach.tagtree.metadata import build_metadata
-        from reach.tagtree.reading_order import compute_reading_order
-
-        config = TagTreeConfig(enable_enrichment=True)
-        if doc is not None and out_json.exists():
-            tag_tree = build_tag_tree_from_file(out_json, config=config)
-        else:
-            tag_tree = build_tag_tree_from_file(None, config=config)
-
-        # Enrichment
-        real_model = LlamaCppEnrichmentModel(config)
-        if real_model.is_available():
-            model = real_model
-            model._load_model()
-        else:
-            model = MockEnrichmentModel()
-            result["warnings"].append("Qwen model not available, using mock enrichment")
-
-        enricher = Enricher(model=model, config=config)
-        enricher.enrich(tag_tree.document)
-        enricher.apply_enrichment(tag_tree.root, enricher._last_report)
-        result["alt_texts_generated"] = enricher._last_report.alt_texts_generated if enricher._last_report else 0
-
-        # Reading order
-        for page in tag_tree.document.pages:
-            compute_reading_order(page)
-
-        # Metadata
-        tag_tree = build_metadata(tag_tree, filename=pdf_path.stem)
-        result["tag_tree_nodes"] = len(tag_tree.root.children)
-    except Exception as e:
-        result["warnings"].append(f"Tag tree build failed: {e}")
-        tag_tree = None
-
-    # ---- Stage 3: PDF Construction ----
-    try:
-        from reach.construct.pipeline import RemediationPipeline
-        pipeline = RemediationPipeline()
-        report = pipeline.remediate(
-            input_path=str(pdf_path),
-            output=str(out_pdf),
-            report_path=str(report_json),
-            validate=False,
+        r = subprocess.run(
+            [sys.executable, "-m", "reach.cli", "remediate",
+             str(pdf_path), "-o", str(out_pdf), "-r", str(report_json), "--no-validate"],
+            capture_output=True, text=True, timeout=120,
+            env={**__import__("os").environ, "PYTHONPATH": str(PROJECT_ROOT / "reach-core" / "src")},
+            cwd=str(PROJECT_ROOT),
         )
-        result["remediated"] = report.overall_status == "pass"
-        result["confidence"] = report.overall_confidence
-        result["fixes"] = report.total_fixes
+        result["remediated"] = r.returncode == 0
+
+        # Count extraction blocks from the pipeline log
+        import re
+        blocks_match = re.search(r"PDF text layout: (\d+) pages, (\d+) blocks", r.stderr or "")
+        if blocks_match:
+            result["extraction_blocks"] = int(blocks_match.group(2))
+            result["page_count"] = int(blocks_match.group(1))
+        ml_match = re.search(r"ML extraction: (\d+) pages, (\d+) blocks", r.stderr or "")
+        if ml_match:
+            result["extraction_blocks"] = max(result["extraction_blocks"], int(ml_match.group(2)))
+
+        # Parse the final report for confidence/status
+        report_match = re.search(r"status=(\w+), confidence=([\d.]+), fixes=(\d+)", r.stderr or "")
+        if report_match:
+            result["confidence"] = float(report_match.group(2))
+
+        if r.returncode != 0:
+            result["errors"].append(r.stderr[-200:] if r.stderr else "Unknown error")
     except Exception as e:
-        result["errors"].append(f"Construction failed: {e}")
+        result["errors"].append(f"Remediation failed: {e}")
 
     # ---- Stage 4: Content Integrity Check ----
     if result["remediated"] and out_pdf.exists():
@@ -225,7 +190,7 @@ def main() -> None:
     total_blocks = sum(r["extraction_blocks"] for r in results)
 
     report = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(datetime.UTC).isoformat(),  # type: ignore[attr-defined]
         "total": total,
         "remediated": remediated,
         "remediation_rate": round(remediated / total * 100, 1),

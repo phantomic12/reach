@@ -89,19 +89,11 @@ def load_surya(
 ) -> "SuryaLayoutModel":
     """Load the Surya layout detection model.
 
-    Args:
-        models_dir: Custom directory for model weights. If None, uses Surya's
-            default cache (~/.cache/surya/).
-        backend: Override backend selection ("cuda", "mps", or "cpu").
-            If None, auto-detects.
-
-    Returns:
-        A loaded SuryaLayoutModel wrapper.
+    Honors ``REACH_NO_ML=1`` to skip the actual model download/load and
+    return a model whose ``is_available`` is False — handy for tests and
+    environments where the layout backend isn't available.
     """
-    backend = backend or _get_surya_backend()
-    log.info("Loading Surya layout model (backend=%s) ...", backend)
-
-    model = SuryaLayoutModel(backend=backend, models_dir=models_dir)
+    model = SuryaLayoutModel(models_dir=models_dir, backend=backend)
     model.load()
     return model
 
@@ -133,8 +125,26 @@ class SuryaLayoutModel:
         self._available = False
 
     def load(self) -> None:
-        """Load layout detection model (DocLayout-YOLO, falls back to Surya v2)."""
-        # Try DocLayout-YOLO first (fast, no Docker needed)
+        """Load layout detection model.
+
+        Honors ``REACH_NO_ML=1`` to skip all model loading — used by tests and
+        environments where the layout backend isn't available (no GPU, no Docker,
+        or models not downloaded).
+
+        Backend preference: DocLayout-YOLO (AGPL-3.0; lightweight, runs in-process,
+        no Docker needed) first. Surya v2 (Apache 2.0) is the secondary backend but
+        currently requires Docker for inference — only relevant when Docker is available.
+
+        Note: this ML layout path is only invoked for scanned / image-only PDFs.
+        The production path uses pikepdf text positions (no ML, no Docker) for
+        digital-born PDFs, so this loader is rarely hit in practice.
+        """
+        import os
+        if os.environ.get("REACH_NO_ML"):
+            log.info("REACH_NO_ML set — skipping layout model loading")
+            return
+
+        # DocLayout-YOLO: lightweight, runs in-process, no Docker needed
         try:
             from doclayout_yolo import YOLOv10
             self._model = YOLOv10.from_pretrained("doclayout-yolo")
@@ -145,7 +155,7 @@ class SuryaLayoutModel:
         except Exception as e:
             log.debug("DocLayout-YOLO unavailable: %s", e)
 
-        # Fall back to Surya v2
+        # Surya v2 fallback (Apache 2.0, but needs Docker for inference)
         try:
             from surya.inference import SuryaInferenceManager
             from surya.layout import LayoutPredictor
@@ -155,7 +165,9 @@ class SuryaLayoutModel:
             self._available = True
             log.info("Surya layout model loaded (v2 API).")
         except ImportError:
-            log.warning("No layout model available. Install doclayout-yolo or surya-ocr.")
+            log.warning(
+                "No layout model available. Install doclayout-yolo or surya-ocr."
+            )
             self._available = False
         except Exception:
             log.exception("Failed to load layout model")

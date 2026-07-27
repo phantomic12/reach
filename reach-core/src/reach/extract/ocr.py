@@ -106,7 +106,18 @@ class UnlimitedOCREngine:
         self._available = False
 
     def load(self) -> None:
-        """Load Unlimited OCR model weights."""
+        """Load Unlimited OCR model weights.
+
+        Honors ``REACH_NO_ML=1`` to skip the actual model download/load —
+        useful for tests and environments where the OCR backend isn't
+        available. The model is still loaded into memory even on CPU since
+        transformers' from_pretrained runs device-agnostic init.
+        """
+        import os
+        if os.environ.get("REACH_NO_ML"):
+            log.info("REACH_NO_ML set — skipping OCR model loading")
+            return
+
         # Unlimited OCR is typically loaded via transformers or a custom
         # loader. We check for the model directory and attempt to load.
         if not self.models_dir.exists():
@@ -119,12 +130,15 @@ class UnlimitedOCREngine:
             return
 
         try:
-            from transformers import AutoModelForCausalLM, AutoTokenizer
+            # Unlimited OCR requires transformers==4.57.1 with AutoModel +
+            # AutoTokenizer (the AutoModelForCausalLM path doesn't route
+            # through this model's auto_map in any transformers version).
+            from transformers import AutoModel, AutoTokenizer
 
             self._tokenizer = AutoTokenizer.from_pretrained(
                 str(self.models_dir), trust_remote_code=True
             )
-            self._model = AutoModelForCausalLM.from_pretrained(
+            self._model = AutoModel.from_pretrained(
                 str(self.models_dir),
                 trust_remote_code=True,
                 torch_dtype="auto",
@@ -160,25 +174,41 @@ class UnlimitedOCREngine:
         Returns:
             Extracted text as a string.
         """
-        if not self._available or not self._model or not self._processor:
+        if not self._available or not self._model or not self._tokenizer:
             log.warning("Unlimited OCR not loaded — returning empty text.")
             return ""
 
+        import tempfile
+        import shutil
+        from pathlib import Path
+
         try:
-            # Preprocess using the already-loaded processor
-            inputs = self._processor(images=image, return_tensors="pt")
-            if self.backend == "cuda":
-                inputs = {k: v.cuda() for k, v in inputs.items()}
-            elif self.backend == "mps":
-                inputs = {k: v.to("mps") for k, v in inputs.items()}
+            with tempfile.TemporaryDirectory(prefix="reach_ocr_") as tmp:
+                tmp_path = Path(tmp)
+                image_file = tmp_path / "input.png"
+                image.save(image_file)
+                output_path = tmp_path / "out"
+                output_path.mkdir()
 
-            # Generate
-            with __import__("torch").no_grad():
-                outputs = self._model.generate(**inputs)
+                # Unlimited OCR exposes a custom .infer() method that handles
+                # image preprocessing + cropping + generation. It writes
+                # results to <output_path>/result.md when save_results=True.
+                self._model.infer(
+                    self._tokenizer,
+                    prompt="<image>Free OCR.",
+                    image_file=str(image_file),
+                    output_path=str(output_path),
+                    base_size=1024,
+                    image_size=640,
+                    crop_mode=True,
+                    save_results=True,
+                )
 
-            # Decode
-            text = self._processor.batch_decode(outputs, skip_special_tokens=True)
-            return text[0] if text else ""
+                result_file = output_path / "result.md"
+                if result_file.exists():
+                    return result_file.read_text(encoding="utf-8")
+                log.warning("Unlimited OCR produced no result.md")
+                return ""
         except Exception:
             log.exception("OCR inference failed")
             return ""

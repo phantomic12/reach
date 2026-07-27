@@ -52,3 +52,14 @@ def mock_gpu_detection(monkeypatch):
         return GPUInfo(backend="cpu", vendor="Test", name="Test CPU", vram_mb=0)
 
     monkeypatch.setattr("reach.models.backend.detect_gpu", _mock_detect)
+
+
+@pytest.fixture(autouse=True)
+def disable_ml_models(monkeypatch):
+    """Skip ML model loading across all tests by default.
+
+    Tests that exercise ML pipelines should explicitly unset REACH_NO_ML or
+    mock the model class. This prevents heavy doclayout-yolo/surya downloads
+    from running during a normal `pytest` run.
+    """
+    monkeypatch.setenv("REACH_NO_ML", "1")

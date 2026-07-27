@@ -82,11 +82,11 @@ class TestSuryaBlock:
 
 
 class TestLoadSurya:
-    def test_load_when_not_installed(self):
-        """When surya-ocr is not installed, model loads gracefully with warning."""
-        with patch("reach.extract.layout.log") as mock_log:
-            model = load_surya(backend="cpu")
-            assert not model.is_available
+    def test_load_when_not_installed(self, monkeypatch):
+        """When REACH_NO_ML is set, model loads without trying backends."""
+        monkeypatch.setenv("REACH_NO_ML", "1")
+        model = load_surya(backend="cpu")
+        assert not model.is_available
 
 
 # ---------------------------------------------------------------------------
@@ -107,35 +107,27 @@ class TestSuryaLayoutModel:
         assert result == [[] for _ in sample_images]
 
     def test_detect_with_mock(self, sample_images, mock_surya_blocks):
-        """Inject mock Surya so we can test the conversion pipeline."""
+        """Inject mock DocLayout-YOLO so we can test the conversion pipeline."""
         model = SuryaLayoutModel(backend="cpu")
-        # Fake availability
+        # Fake availability + mock model
         model._available = True
         model._model = MagicMock()
-        model._processor = MagicMock()
-
-        # Make detect() return mock blocks
-        model._batch_func = MagicMock()
-        # Create a mock DetectionResult
-        mock_result = MagicMock()
-        # Each bbox in surya is a PolygonBox with .label, .bbox, .position, .confidence
-        mock_poly_boxes = []
+        # Build the shape detect() expects: list[page_result], each page_result is iterable
+        # of dicts with label/bbox/confidence keys.
+        page_results = []
         for sb in mock_surya_blocks:
-            pb = MagicMock()
-            pb.label = sb.label
-            pb.bbox = sb.bbox
-            pb.position = sb.reading_order
-            pb.confidence = sb.confidence
-            mock_poly_boxes.append(pb)
-        mock_result.bboxes = mock_poly_boxes
-        model._batch_func.return_value = [mock_result]
+            page_results.append({
+                "label": sb.label,
+                "bbox": sb.bbox,
+                "confidence": sb.confidence,
+            })
+        model._model.detect.return_value = [page_results]
 
-        with patch.object(model, "_batch_func", model._batch_func):
-            result = model.detect(sample_images[:1])
-            assert len(result) == 1
-            # Should have our mock blocks sorted
-            assert len(result[0]) == len(mock_surya_blocks)
-            assert result[0][0].label == "Section-header"
+        result = model.detect(sample_images[:1])
+        assert len(result) == 1
+        # Should have our mock blocks
+        assert len(result[0]) == len(mock_surya_blocks)
+        assert result[0][0].label == "Section-header"
 
     def test_unload(self):
         model = SuryaLayoutModel(backend="cpu")
@@ -262,23 +254,18 @@ class TestAnalyzeLayout:
         assert result == [[] for _ in sample_images]
 
     def test_with_mock_surya(self, sample_images):
-        """Full flow with a mocked Surya model."""
+        """Full flow with a mocked layout model."""
         model = SuryaLayoutModel(backend="cpu")
 
         # Set up mock availability
         model._available = True
         model._model = MagicMock()
-        model._processor = MagicMock()
-        model._batch_func = MagicMock()
-
-        mock_result = MagicMock()
-        pb = MagicMock()
-        pb.label = "Plain text"
-        pb.bbox = [0, 0, 100, 20]
-        pb.position = 0
-        pb.confidence = 0.95
-        mock_result.bboxes = [pb]
-        model._batch_func.return_value = [mock_result]
+        # detect() expects a list of page_results, each iterable of dicts.
+        model._model.detect.return_value = [[{
+            "label": "Plain text",
+            "bbox": [0, 0, 100, 20],
+            "confidence": 0.95,
+        }]]
 
         page_texts = ["Hello world from the PDF content stream."]
         result = analyze_layout(sample_images[:1], model=model, page_texts=page_texts)

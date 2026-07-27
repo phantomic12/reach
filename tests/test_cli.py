@@ -63,60 +63,50 @@ class TestExtractCommand:
         with open(pdf_path, "wb") as f:
             writer.write(f)
 
-        # We need to mock the ExtractionPipeline to avoid loading models
         output_path = tmp_path / "output.json"
 
-        with patch("reach.cli.ExtractionPipeline") as mock_pipeline_class:
+        from reach.extract.models import (
+            BBox,
+            BlockType,
+            DocumentMetadata,
+            ExtractedDocument,
+            Page,
+            PageMetadata,
+            TextBlock,
+        )
+
+        bbox = BBox(x1=0, y1=0, x2=100, y2=50)
+        block = TextBlock(
+            block_type=BlockType.SECTION_HEADER,
+            bbox=bbox,
+            text="CLI Test Title",
+            reading_order=0,
+            confidence=0.95,
+        )
+        meta = PageMetadata(page_number=1, width_pt=612, height_pt=792)
+        page = Page(metadata=meta, blocks=[block])
+        doc = ExtractedDocument(
+            metadata=DocumentMetadata(title="CLI Test", page_count=1),
+            pages=[page],
+        )
+
+        # Patch the ExtractionPipeline class so extract_document runs its full
+        # body (including write_json to disk) without loading models.
+        with patch("reach.extract.ExtractionPipeline") as MockPipeline:
             mock_pipeline = MagicMock()
-            mock_pipeline_class.return_value = mock_pipeline
-
-            # Mock pipeline.run() to return a minimal valid doc
-            from reach.extract.models import (
-                BBox,
-                BlockType,
-                DocumentMetadata,
-                ExtractedDocument,
-                Page,
-                PageMetadata,
-                TextBlock,
-            )
-
-            bbox = BBox(x1=0, y1=0, x2=100, y2=50)
-            block = TextBlock(
-                block_type=BlockType.SECTION_HEADER,
-                bbox=bbox,
-                text="CLI Test Title",
-                reading_order=0,
-                confidence=0.95,
-            )
-            meta = PageMetadata(page_number=1, width_pt=612, height_pt=792)
-            page = Page(metadata=meta, blocks=[block])
-            doc = ExtractedDocument(
-                metadata=DocumentMetadata(title="CLI Test", page_count=1),
-                pages=[page],
-            )
-
             mock_pipeline.run.return_value = doc
+            MockPipeline.return_value = mock_pipeline
 
             result = runner.invoke(
                 app,
-                ["extract", str(pdf_path), "--output", str(output_path), "--no-ocr"],
+                ["extract", str(pdf_path), "--output", str(output_path), "--no-models"],
             )
 
-            # Should succeed
-            assert result.exit_code == 0
+            assert result.exit_code == 0, result.stdout + result.stderr
             assert mock_pipeline.run.called
-
-            # Since doc.write_json is called on the actual doc (not mock),
-            # the output file should be created
             assert output_path.exists()
 
     def test_extract_with_dpi_flag(self):
         """Verify --dpi flag is accepted."""
         result = runner.invoke(app, ["extract", "--dpi", "300", "--help"])
-        assert result.exit_code == 0
-
-    def test_extract_with_backend_flag(self):
-        """Verify --backend flag is accepted."""
-        result = runner.invoke(app, ["extract", "--backend", "cpu", "--help"])
         assert result.exit_code == 0

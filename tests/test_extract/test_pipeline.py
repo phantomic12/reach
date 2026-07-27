@@ -56,14 +56,13 @@ def mock_surya():
     # Make it appear available
     model._available = True
     model._model = MagicMock()
-    model._processor = MagicMock()
 
-    # Mock batch detection to return blocks per page
+    # DocLayout-YOLO path: model._model.detect(images) -> list of pages,
+    # each page is an iterable of dicts with label/bbox/confidence keys.
     def fake_detect(images, *args, **kwargs):
         results = []
         for _ in images:
-            mock_result = MagicMock()
-            pbs = []
+            page = []
             for i, (label, bbox, order) in enumerate(
                 [
                     ("Section-header", [50, 50, 550, 80], 0),
@@ -71,36 +70,34 @@ def mock_surya():
                     ("Page-footer", [200, 750, 400, 780], 2),
                 ]
             ):
-                pb = MagicMock()
-                pb.label = label
-                pb.bbox = bbox
-                pb.position = order
-                pb.confidence = 0.9 - i * 0.05
-                pbs.append(pb)
-            mock_result.bboxes = pbs
-            results.append(mock_result)
+                page.append({
+                    "label": label,
+                    "bbox": bbox,
+                    "confidence": 0.9 - i * 0.05,
+                    "reading_order": order,
+                })
+            results.append(page)
         return results
 
-    model._batch_func = fake_detect
+    model._model.detect.side_effect = fake_detect
     return model
 
 
 @pytest.fixture
 def mock_ocr():
-    """An OCR engine that returns recognizable text."""
+    """An OCR engine that returns recognizable text via the new infer() API."""
     engine = UnlimitedOCREngine(backend="cpu")
     engine._available = True
     engine._model = MagicMock()
-    engine._processor = MagicMock()
+    engine._tokenizer = MagicMock()
 
-    def fake_batch_decode(outputs, **kwargs):
-        return ["Mocked OCR text for region."]
+    def fake_infer(tokenizer, prompt="", image_file="", output_path="", **_kwargs):
+        from pathlib import Path
+        out = Path(output_path) / "result.md"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("Mocked OCR text for region.", encoding="utf-8")
 
-    engine._processor.batch_decode = fake_batch_decode
-    engine._processor.return_value = {"pixel_values": MagicMock()}
-
-    mock_outputs = MagicMock()
-    engine._model.generate.return_value = mock_outputs
+    engine._model.infer.side_effect = fake_infer
     return engine
 
 
