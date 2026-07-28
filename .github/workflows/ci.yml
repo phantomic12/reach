@@ -16,8 +16,53 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest -q --tb=short
 
-  build-linux:
+  validate-with-verapdf:
     needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -e ".[dev]"
+
+      # Install veraPDF greenfield (the official CLI distribution). The
+      # installer ships a self-contained JRE + the verapdf script.
+      - name: Install veraPDF
+        run: |
+          set -e
+          VERAPDF_VERSION=1.28.2
+          curl -fsSL -o /tmp/verapdf.zip \
+            "https://software.verapdf.org/releases/verapdf-greenfield-${VERAPDF_VERSION}-installer.zip"
+          apt-get update && apt-get install -y --no-install-recommends unzip default-jre-headless
+          unzip -q /tmp/verapdf.zip -d /tmp/verapdf-installer
+          printf '1\n1\n' | bash /tmp/verapdf-installer/verapdf-install
+          VERAPDF_BIN="$HOME/verapdf/verapdf-greenfield/verapdf"
+          echo "VERAPDF_CLI=$VERAPDF_BIN" >> $GITHUB_ENV
+          $VERAPDF_BIN --version
+
+      # Build a sample PDF with the in-process pipeline, then validate it.
+      - name: Generate + validate test PDF
+        run: |
+          set -e
+          PYTHONPATH=reach-core/src python scripts/benchmark.py --limit 1 --output /tmp/bench.json
+          OUT_PDF=$(ls tests/benchmark_output/*-remediated.pdf | head -1)
+          echo "Validating $OUT_PDF with veraPDF ua-2 profile..."
+          $VERAPDF_CLI --format mrr --flavour ua-2 "$OUT_PDF" > /tmp/verapdf-report.xml
+          python -c "
+          import sys, xml.etree.ElementTree as ET
+          tree = ET.parse('/tmp/verapdf-report.xml')
+          ns = 'http://www.verapdf.org/MachineReadableReport'
+          failed = [r for r in tree.iter('{%s}rule' % ns) if r.get('status') == 'failed']
+          if failed:
+              print(f'veraPDF failed {len(failed)} rule(s):', file=sys.stderr)
+              for r in failed[:5]:
+                  print(f'  - {r.get(\"ruleId\")}: {(r.get(\"message\") or \"\")[:120]}', file=sys.stderr)
+              sys.exit(1)
+          print('veraPDF ua-2 validation passed')
+          "
+
+  build-linux:
+    needs: [test, validate-with-verapdf]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +74,7 @@ jobs:
         with: {name: reach-linux, path: dist/reach}
 
   build-windows:
-    needs: test
+    needs: [test, validate-with-verapdf]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +86,7 @@ jobs:
         with: {name: reach-windows, path: dist/reach.exe}
 
   docker:
-    needs: test
+    needs: [test, validate-with-verapdf]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -19,6 +19,7 @@ from typing import Optional
 from PIL import Image
 
 from reach.extract.models import (
+    BBox,
     BlockType,
     EquationBlock,
     TableBlock,
@@ -179,8 +180,19 @@ class UnlimitedOCREngine:
             return ""
 
         import tempfile
-        import shutil
         from pathlib import Path
+
+        # Resize the image to Unlimited OCR's expected size range. The model
+        # uses base_size=1024 internally and crop_mode=True; oversized images
+        # get rejected with "no text found" because the encoder downsamples
+        # too aggressively. Cap the longest side at 2048 (≈ 2x base_size) for
+        # the gundam config which is what we use.
+        max_side = 2048
+        if max(image.size) > max_side:
+            ratio = max_side / max(image.size)
+            new_size = (int(image.size[0] * ratio), int(image.size[1] * ratio))
+            log.debug("Resizing OCR input from %s to %s", image.size, new_size)
+            image = image.resize(new_size, Image.LANCZOS)
 
         try:
             with tempfile.TemporaryDirectory(prefix="reach_ocr_") as tmp:
@@ -193,6 +205,16 @@ class UnlimitedOCREngine:
                 # Unlimited OCR exposes a custom .infer() method that handles
                 # image preprocessing + cropping + generation. It writes
                 # results to <output_path>/result.md when save_results=True.
+                #
+                # The 'gundam' config (crop_mode=True, image_size=640) is the
+                # default per the README. It first runs figure detection, then
+                # OCRs each figure region. For full-page scanned images this
+                # can degenerate to "one figure, no text" — the model treats
+                # the whole page as a single image and emits just a bounding
+                # box placeholder. Fall back to the 'base' config
+                # (crop_mode=False, image_size=1024) which OCRs the whole page
+                # directly when the gundam result looks like a single image
+                # with no real text.
                 self._model.infer(
                     self._tokenizer,
                     prompt="<image>Free OCR.",
@@ -204,14 +226,50 @@ class UnlimitedOCREngine:
                     save_results=True,
                 )
 
+                result_text = ""
                 result_file = output_path / "result.md"
                 if result_file.exists():
-                    return result_file.read_text(encoding="utf-8")
-                log.warning("Unlimited OCR produced no result.md")
-                return ""
+                    result_text = self._strip_ocr_artifacts(
+                        result_file.read_text(encoding="utf-8")
+                    )
+
+                # If gundam only produced a placeholder ("one image, no text"),
+                # retry with the base config (whole-page OCR, no crop).
+                if not result_text or result_text == self._strip_ocr_artifacts(
+                    "<|det|>image [0, 0, 999, 999]<|/det|>"
+                ):
+                    log.debug("Gundam OCR produced no text; retrying with base config")
+                    self._model.infer(
+                        self._tokenizer,
+                        prompt="<image>document parsing.",
+                        image_file=str(image_file),
+                        output_path=str(output_path),
+                        base_size=1024,
+                        image_size=1024,
+                        crop_mode=False,
+                        save_results=True,
+                    )
+                    if result_file.exists():
+                        result_text = self._strip_ocr_artifacts(
+                            result_file.read_text(encoding="utf-8")
+                        )
+
+                return result_text
         except Exception:
             log.exception("OCR inference failed")
             return ""
+
+    @staticmethod
+    def _strip_ocr_artifacts(text: str) -> str:
+        """Remove Unlimited OCR placeholder tokens from recognized text."""
+        import re
+        # Detection boxes like `<|det|>image [0, 0, 999, 999]<|/det|>`
+        text = re.sub(r"<\|det\|>.*?<\|/det\|>", "", text, flags=re.DOTALL)
+        # Image markdown placeholders `![](images/0.jpg)`
+        text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
+        # Page break markers `<page>` / `<|end▁of▁sentence|>`
+        text = re.sub(r"<page>|<\|end▁of▁sentence\|>", "", text)
+        return text.strip()
 
     def recognize_region(self, image: Image.Image, bbox: tuple[float, float, float, float]) -> str:
         """Run OCR on a specific region of an image.
@@ -428,6 +486,19 @@ def extract_page_text_with_ocr(
             segments = _naive_text_distribution(full_text, len(text_blocks))
             for block, seg in zip(text_blocks, segments):
                 block.text = seg
+        elif full_text and not text_blocks:
+            # Layout failed (no blocks) but OCR recovered text. Wrap the
+            # full OCR'd text in a single page-spanning TextBlock so the
+            # downstream pipeline has something to tag.
+            blocks = [
+                TextBlock(
+                    block_type=BlockType.TEXT,
+                    bbox=BBox(x1=0, y1=0, x2=612, y2=792),
+                    text=full_text,
+                    reading_order=0,
+                    confidence=1.0,
+                )
+            ]
 
     elif engine.is_available:
         # Digital-born: run OCR only on blocks that don't have text

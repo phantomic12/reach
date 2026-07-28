@@ -204,7 +204,7 @@ class RemediationPipeline:
         ml_success = False
         try:
             from reach.extract import extract_document
-            doc = extract_document(str(input_path), load_models=True, dpi=150)
+            doc = extract_document(str(input_path), load_models=True, dpi=300)
             if doc.all_blocks:
                 for page in doc.pages:
                     blocks_data = []
