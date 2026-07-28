@@ -261,15 +261,46 @@ class UnlimitedOCREngine:
 
     @staticmethod
     def _strip_ocr_artifacts(text: str) -> str:
-        """Remove Unlimited OCR placeholder tokens from recognized text."""
+        """Remove Unlimited OCR placeholder tokens from recognized text.
+
+        Also deduplicates consecutive identical lines — the model occasionally
+        emits overlapping detection boxes (e.g., one box for "that should be
+        detected" and a larger one for "that should be detected\nas separate
+        regions by OCR.") which leaves the inner text appearing twice.
+        """
         import re
-        # Detection boxes like `<|det|>image [0, 0, 999, 999]<|/det|>`
+        # Detection boxes like `<|det|>title [43, 109, 999, 202]<|/det|>`
         text = re.sub(r"<\|det\|>.*?<\|/det\|>", "", text, flags=re.DOTALL)
         # Image markdown placeholders `![](images/0.jpg)`
         text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
         # Page break markers `<page>` / `<|end▁of▁sentence|>`
         text = re.sub(r"<page>|<\|end▁of▁sentence\|>", "", text)
+
+        # Collapse runs of 3+ newlines (the model emits double newlines between
+        # paragraphs) and dedup consecutive identical lines.
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = UnlimitedOCREngine._dedup_consecutive_lines(text)
         return text.strip()
+
+    @staticmethod
+    def _dedup_consecutive_lines(text: str) -> str:
+        """Remove consecutive duplicate lines from OCR output.
+
+        The Unlimited OCR model occasionally emits the same text twice when
+        it produces overlapping detection boxes. This collapses those dupes
+        while preserving intentional repetition in different paragraphs.
+        """
+        lines = text.split("\n")
+        deduped: list[str] = []
+        prev: str | None = None
+        for line in lines:
+            stripped = line.strip()
+            if stripped and stripped == prev:
+                # Skip this duplicate line but keep the rest
+                continue
+            deduped.append(line)
+            prev = stripped
+        return "\n".join(deduped)
 
     def recognize_region(self, image: Image.Image, bbox: tuple[float, float, float, float]) -> str:
         """Run OCR on a specific region of an image.
