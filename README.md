@@ -81,6 +81,24 @@ pip install -e ".[dev]"
 pytest -q --tb=short
 ```
 
+## Benchmark
+
+Two benchmark scripts ship with the project:
+
+```bash
+# Local corpus (digital-born PDFs in tests/corpus/)
+scripts/benchmark.py --limit 50 --output report.json
+
+# veraPDF Matterhorn corpus (PDF/UA-1 + PDF/UA-2 test suite)
+scripts/setup_matterhorn.sh     # clones ~246MB corpus on first run
+scripts/benchmark_matterhorn.py --flavour ua2 --limit 50 --markdown --output report.json
+```
+
+The Matterhorn benchmark parses each PDF's expected verdict from its
+filename (`<rule>-t<num>-<expected>-<variant>.pdf`), runs Reach over it,
+then scores the output with veraPDF. Verdicts: `remediated` (fail→pass),
+`preserved` (pass→pass), `regressed` (pass→fail), `failed` (fail→fail).
+
 ## Model stack
 
 | Model                  | Purpose                          | License    |

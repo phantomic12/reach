@@ -30,6 +30,9 @@ htmlcov/
 tests/corpus/
 tests/output/
 tests/test_report.json
+# Matterhorn corpus + benchmark artifacts (cloned on demand; 246MB + per-case PDFs)
+tests/matterhorn/
+tests/matterhorn_benchmark_output/
 
 # Artifacts
 test.pdf
