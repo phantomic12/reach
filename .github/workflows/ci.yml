@@ -70,7 +70,7 @@ jobs:
         with: {python-version: "3.12"}
       - run: pip install pyinstaller && pip install -e ".[server,ocr,surya]"
       - run: pyinstaller reach.spec
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: {name: reach-linux, path: dist/reach}
 
   build-windows:
@@ -82,7 +82,7 @@ jobs:
         with: {python-version: "3.12"}
       - run: pip install pyinstaller && pip install -e ".[server,ocr,surya]"
       - run: pyinstaller reach.spec
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: {name: reach-windows, path: dist/reach.exe}
 
   docker:
@@ -100,9 +100,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: {name: reach-linux, path: dist}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: {name: reach-windows, path: dist}
       - name: Smoke-test the binary
         run: |
