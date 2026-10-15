@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: "3.12"}
+        with: {python-version: "3.15"}
       - run: pip install -e ".[dev]"
       - run: pytest -q --tb=short
 
@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: "3.12"}
+        with: {python-version: "3.15"}
       - run: pip install -e ".[dev]"
 
       # Install veraPDF greenfield (the official CLI distribution). The
@@ -67,7 +67,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: "3.12"}
+        with: {python-version: "3.15"}
       - run: pip install pyinstaller && pip install -e ".[server,ocr,surya]"
       - run: pyinstaller reach.spec
       - uses: actions/upload-artifact@v4
@@ -79,7 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: "3.12"}
+        with: {python-version: "3.15"}
       - run: pip install pyinstaller && pip install -e ".[server,ocr,surya]"
       - run: pyinstaller reach.spec
       - uses: actions/upload-artifact@v4
