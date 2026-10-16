@@ -41,7 +41,7 @@ ocr = [
     # Unlimited OCR (baidu/Unlimited-OCR) requires transformers==4.57.1 with
     # AutoModel + AutoTokenizer. transformers 5.x removes symbols the model's
     # custom code depends on. Pin to 4.x.
-    "transformers>=4.57,<5",
+    "transformers>=5.20,<6",
     "einops>=0.8",
     "addict>=2.4",
     "easydict>=1.13",
